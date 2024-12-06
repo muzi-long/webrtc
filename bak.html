@@ -1,0 +1,306 @@
+<html>
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+    <link rel="stylesheet" href="static/css/element.css">
+    <!-- <script src="https://unpkg.com/vue@2/dist/vue.js"></script> -->
+<script src="static/js/vue.js"></script>
+<!-- import JavaScript -->
+<!-- <script src="https://unpkg.com/element-ui/lib/index.js"></script> -->
+<script src="static/js/element.js"></script>
+<script src="static/js/jssip-3.9.1.min.js"></script>
+    <title>Element Plus demo</title>
+</head>
+
+<body>
+    <div id="app">
+        <el-form label-width="80px">
+            <el-form-item label="协议">
+                <el-radio-group v-model="form.proto">
+                    <el-radio label="ws"></el-radio>
+                    <el-radio label="wss"></el-radio>
+                </el-radio-group>
+            </el-form-item>
+            <el-form-item label="SIP服务器">
+                <el-input v-model="form.host"></el-input>
+            </el-form-item>
+            <el-form-item label="端口">
+                <el-input v-model="form.port"></el-input>
+            </el-form-item>
+            <el-form-item label="帐号">
+                <el-input v-model="form.username"></el-input>
+            </el-form-item>
+            <el-form-item label="密码">
+                <el-input v-model="form.password"></el-input>
+            </el-form-item>
+            <el-form-item label="被叫" v-show="this.status == 'register'">
+                <el-input v-model="callee"></el-input>
+            </el-form-item>
+            <el-form-item>
+                <el-button-group>
+                    <el-button type="primary" @click="call">呼叫</el-button>
+                    <el-button type="primary" @click="answer">接听</el-button>
+                    <el-button type="primary" @click="hold">保持</el-button>
+                    <el-button type="primary" @click="unhold">取消保持</el-button>
+                    <el-button type="primary" @click="mute">静音</el-button>
+                    <el-button type="primary" @click="unmute">取消静音</el-button>
+                    <el-button type="primary" @click="preTransfer">转接</el-button>
+                    <el-button type="danger" @click="hangup">挂断</el-button>
+                    <el-button type="success" @click="register" :disabled="this.status == 'register'">注册</el-button>
+                    <el-button type="info" @click="unregister" :disabled="this.status == 'unregister'">注销</el-button>
+                </el-button-group>
+            </el-form-item>
+        </el-form>
+    </div>
+
+    <script>
+        //本地媒体流
+        var localStream = null;
+
+        //创建audio控件并且自动播放
+        const audioView = document.createElement('audio')
+        audioView.autoplay = true;
+
+        //媒体控制
+        const constraints = {
+            audio: true,
+            video: false
+        }
+
+        const getLocalMedia = (stream) => {
+            localStream = stream;
+            audioView.src = URL.createObjectURL(stream)
+        }
+
+        const captureLocalMedia = () => {
+            navigator.getUserMedia(constraints, getLocalMedia, (e) => {
+                console.error('getUserMedia() err: ' + e.name)
+            })
+        }
+        //处理音频播放
+        const handleAudio = (pc) => {
+            pc.onaddstream = (media) => {
+                let remoteStream = media.stream;
+                if (remoteStream.active) {
+                    audioView.srcObject = remoteStream;
+                }
+            }
+        }
+        const eventHandlers = {
+            //回铃音处理
+            peerconnection: (e) => {
+                let pc = e.peerconnection
+                handleAudio(pc)
+            }
+        };
+        const { toRaw } = Vue
+        const App = {
+            data() {
+                return {
+                    // 注册参数
+                    form: {
+                        proto: "wss",
+                        host: "sip.callcenter.test.meiqia.com",
+                        port: 7443,
+                        username: "9898",
+                        password: "1234."
+                    },
+                    // 被叫
+                    callee: "",
+                    // jssips ua
+                    ua: "",
+                    socket: "",
+                    status: "unregister",
+                    currentSession: null
+                };
+            },
+            mounted() {
+                this.socket = new JsSIP.WebSocketInterface(this.form.proto + "://" + this.form.host + ":" + this.form.port);
+                var configuration = {
+                    sockets: [this.socket],
+                    uri: "sip:" + this.form.username + "@" + this.form.host,
+                    password: this.form.password,
+                    register: false,
+                    register_expires: 300,
+                    session_timers: false,
+                    user_agent: "JsSIP"
+                };
+                this.ua = new JsSIP.UA(configuration);
+                this.ua.on("registered", (e) => {
+                    console.log("registered")
+                    this.status = "register"
+                    this.$message.success("已注册")
+                })
+                this.ua.on("unregistered", (e) => {
+                    console.log("unregistered")
+                    this.status = "unregister"
+                    this.$message.warning("已注销")
+                })
+                //电话事件监听
+                this.ua.on('newRTCSession', (data) => {
+                    console.info('on new rtcsession: ', data)
+                    this.currentSession = data.session;
+                    if (data.originator === 'remote') {
+                        //来电处理
+                        console.info('>>>>>>>>>>>>>>>>>>>>来电>>>>>>>>>>>>>>>>>>>>')
+                        console.log("来电号码：" + data.request.from._uri.user)
+                        //提示有新的来电，是否作自动接听
+
+                    } else {
+                        console.info('<<<<<<<<<<<<<<<<<<<<外呼<<<<<<<<<<<<<<<<<<<<')
+                        console.log("被叫号码：" + data.request.to._uri.user)
+                    }
+
+                    this.currentSession.on('progress', (evt) => {
+                        console.info('通话振铃-->通话振铃')
+                        //onChangeState(currentEvent, { direction: direction, otherLegNumber: data.request.from._uri.user, callId: currentCallId })
+                    });
+
+                    this.currentSession.on('accepted', (evt) => {
+                        console.info('通话中-->通话中')
+                        //onChangeState(IN_CALL)
+                    });
+
+                    this.currentSession.on('ended', (evt) => {
+                        console.info('通话结束-->通话结束')
+                        //onChangeState(CALL_END)
+                    });
+
+                    this.currentSession.on('failed', (evt) => {
+                        console.info('通话失败-->通话失败')
+                        //onChangeState(CALL_END)
+                    })
+
+                    this.currentSession.on('hold', (evt) => {
+                        console.info('通话保持-->通话保持')
+                        //onChangeState(HOLD)
+                    });
+
+                    this.currentSession.on('unhold', (evt) => {
+                        console.info('通话恢复-->通话恢复')
+                        //onChangeState(IN_CALL)
+                    })
+
+                    this.currentSession.on('peerconnection', (evt) => {
+                        console.info('onPeerconnection - ', data.peerconnection);
+                        //处理通话中媒体流
+                        handleAudio(evt.peerconnection)
+                    });
+
+                    //防止检测时间过长
+                    let iceCandidateTimeout = null;
+                    this.currentSession.on('icecandidate', (evt) => {
+                        if (iceCandidateTimeout != null) {
+                            clearTimeout(iceCandidateTimeout);
+                        }
+                        console.log("网卡检测:", evt.candidate.type)
+
+                        if (evt.candidate.type === "srflx" || evt.candidate.type === "relay") {
+                            evt.ready();
+                        }
+                        iceCandidateTimeout = setTimeout(evt.ready, 1000);
+                    })
+
+                })
+                this.ua.start()
+            },
+            methods: {
+                register() {
+                    if (this.status == "unregister") {
+                        toRaw(this.ua).register()
+                    }
+                },
+                unregister() {
+                    if (this.status == "register") {
+                        toRaw(this.ua).unregister({ all: true })
+                    }
+                },
+                call() {
+                    if (this.status == "register") {
+                        this.currentSession = toRaw(this.ua).call(this.callee, {
+                            eventHandlers: eventHandlers,
+                            mediaConstraints: constraints,
+                            mediaStream: localStream,
+                            //extraHeaders: ["X-JCallId: " + currentCallId],
+                            sessionTimersExpires: 120,
+                            'pcConfig': {
+                                'iceServers': [
+                                    { 'urls': ['stun:public.callcenter.meiqia.com'] }
+                                    //{ 'urls': 'turn:public.callcenter.meiqia.com', 'username': 'foo', 'credential': ' 1234' }
+                                ]
+                            }
+                        });
+                    }
+                },
+                hangup() {
+                    if (this.currentSession != null && !this.currentSession.isEnded) {
+                        this.currentSession.terminate()
+                    }
+                },
+                answer() {
+                    this.currentSession.answer({
+                        mediaConstraints: constraints,
+                        pcConfig: {
+                            'iceServers': [
+                                { 'urls': ['stun:public.callcenter.meiqia.com'] }
+                                //{ 'urls': 'turn:public.callcenter.meiqia.com', 'username': 'foo', 'credential': ' 1234' }
+                            ]
+                        }
+                    })
+                },
+                // 保持通话
+                hold() {
+                    if (this.currentSession != null && this.currentSession.isEstablished()) {
+                        this.currentSession.hold()
+                    }
+                },
+                // 取消保持
+                unhold() {
+                    if (this.currentSession != null && this.currentSession.isEstablished()) {
+                        this.currentSession.unhold()
+                    }
+                },
+                // 静音
+                mute() {
+                    if (this.currentSession != null && this.currentSession.isEstablished()) {
+                        this.currentSession.mute()
+                    }
+                },
+                // 取消静音
+                unmute() {
+                    if (this.currentSession != null && this.currentSession.isEstablished()) {
+                        this.currentSession.unmute()
+                    }
+                },
+                // 转接
+                transfer(target) {
+                    if (this.currentSession != null && this.currentSession.isEstablished()) {
+                        this.currentSession.refer(phone)
+                    }
+                },
+                // 转接弹框
+                preTransfer() {
+                    this.$messageBox.prompt('请输入转接号码', '转接', {
+                        confirmButtonText: '确认',
+                        cancelButtonText: '取消',
+                        //inputPattern:/[\w!#$%&'*+/=?^_`{|}~-]+(?:\.[\w!#$%&'*+/=?^_`{|}~-]+)*@(?:[\w](?:[\w-]*[\w])?\.)+[\w](?:[\w-]*[\w])?/,
+                        //inputErrorMessage: 'Invalid Email',
+                    })
+                        .then(({ value }) => {
+                            this.transfer(value)
+                            this.$message.success("已转接")
+                        })
+                        .catch(() => {
+                            this.$message.info("取消转接")
+                        })
+                }
+            }
+        };
+        const app = Vue.createApp(App);
+        app.use(ElementPlus);
+        app.mount("#app");
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="UTF-8">
+  <!-- import CSS -->
+  <!-- <link rel="stylesheet" href="https://unpkg.com/element-ui/lib/theme-chalk/index.css"> -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="static/css/element.css">
+</head>
+
+<body>
+  <div id="app">
+    <el-row>
+      <el-col :xl="{span: 6, offset: 9}" :lg="{span: 8, offset: 8}" :md="{span: 10, offset: 6}"
+        :sm="{span: 12, offset: 6}" :xs="{span: 24, offset: 0}">
+        <!-- 注册表单 -->
+        <el-card class="box-card" v-show="this.registerStatus == 'unregister'">
+          <div slot="header" class="clearfix"><span>注册信息</span></div>
+          <div class="text item">
+            <el-form ref="form" label-width="80px" size="mini" :model="form">
+              <el-form-item label="协议">
+                <el-radio-group v-model="form.proto">
+                  <el-radio label="ws"></el-radio>
+                  <el-radio label="wss"></el-radio>
+                </el-radio-group>
+              </el-form-item>
+              <el-form-item label="帐号" prop="username" :rules="[{ required: true, message: '帐号不能为空'}]">
+                <el-input placeholder="请输入" clearable v-model="form.username" autocomplete="off"></el-input>
+              </el-form-item>
+              <el-form-item label="密码" prop="password" :rules="[{ required: true, message: '密码不能为空'}]">
+                <el-input placeholder="请输入" clearable v-model="form.password"></el-input>
+              </el-form-item>
+              <el-form-item label="地址" prop="host" :rules="[{ required: true, message: '地址不能为空'}]">
+                <el-col :span="16">
+                  <el-input placeholder="127.0.0.1" clearable v-model="form.host"></el-input>
+                </el-col>
+                <el-col style="text-align: center;" :span="1">:</el-col>
+                <el-col :span="7">
+                  <el-input type="number" placeholder="5060" v-model="form.port"></el-input>
+                </el-col>
+              </el-form-item>
+              <el-form-item>
+                <el-button type="primary" @click="register('form')"
+                  :loading="loadRegData.status">{{loadRegData.text}}</el-button>
+              </el-form-item>
+            </el-form>
+          </div>
+        </el-card>
+
+
+        <!-- 注册后 -->
+        <el-card class="box-card" v-show="this.registerStatus == 'register'">
+          <div slot="header" class="clearfix"><span>拨打电话</span></div>
+          <div class="text item">
+            <el-form size="mini" @submit.native.prevent>
+
+              <!-- 拨号输入 -->
+              <el-form-item>
+                <el-col :span="14">
+                  <el-input placeholder="请输入号码" clearable prefix-icon="el-icon-phone" v-model="phone"
+                    @keyup.enter.native="handleKeyup"></el-input>
+                </el-col>
+                <el-col :span="10">
+                  <el-button-group>
+                    <el-button type="success" @click="call()" :disabled="callBtn">拨打</el-button>
+                    <el-button type="danger" @click="unregister">注销</el-button>
+                  </el-button-group>
+                </el-col>
+              </el-form-item>
+
+              <!-- 呼入、呼出弹屏 -->
+              <el-form-item v-show="this.callStatus !== ''">
+                <el-tag>{{originator}}:{{phone}}</el-tag>
+                <el-tag type="warning">{{callTime}}</el-tag>
+                <el-button type="success" size="small" icon="el-icon-phone-outline" circle @click="answer()"
+                  v-show="this.callStatus === 'call_in'"></el-button>
+                <el-button type="danger" size="small" icon="el-icon-phone-outline" circle @click="hangup()"></el-button>
+                <el-popover placement="bottom" trigger="click" width="150" v-show="this.callStatus === 'busy'">
+                  <el-button size="small" icon="el-icon-menu" circle slot="reference"></el-button>
+                  <el-row>
+                    <el-col :span="8" style="text-align: center;" v-for="(dtmf, index) in dtmfs" :key="index"><el-button
+                        @click="sendDtmf(dtmf)">{{dtmf}}</el-button></el-col>
+                  </el-row>
+                </el-popover>
+              </el-form-item>
+
+              <!-- 通话中发送按键 -->
+              <el-form-item v-show="this.callStatus === 'busy'">
+                <el-col :span="24">
+                  <b>延迟: </b>{{audioReport.roundTripTime.toFixed(2)}} ms，
+                  <b>丢包: </b><i class="el-icon-top"></i>{{(audioReport.upLossRate*100).toFixed(2)}}% / <i
+                    class="el-icon-bottom"></i>{{(audioReport.downLossRate*100).toFixed(2)}}%
+                </el-col>
+              </el-form-item>
+              <el-form-item v-show="this.callStatus === 'busy'">
+                <el-col :span="2"><span><i class="el-icon-microphone"></i></span></el-col>
+                <el-col :span="22"><el-progress :percentage="audioReport.outboundAudioLevel * 100" status="success"
+                    :stroke-width="28" :show-text="false"></el-progress></el-col>
+              </el-form-item>
+              <el-form-item v-show="this.callStatus === 'busy'">
+                <el-col :span="2"><span><i class="el-icon-headset"></i></span></el-col>
+                <el-col :span="22"><el-progress :percentage="audioReport.inboundAudioLevel * 100" status="warning"
+                    :stroke-width="24" :show-text="false"></el-progress></el-col>
+              </el-form-item>
+
+            </el-form>
+          </div>
+        </el-card>
+
+      </el-col>
+    </el-row>
+  </div>
+</body>
+
+<!-- import Vue before Element -->
+<!-- <script src="https://unpkg.com/vue@2/dist/vue.js"></script> -->
+<script src="static/js/vue.js"></script>
+<!-- import JavaScript -->
+<!-- <script src="https://unpkg.com/element-ui/lib/index.js"></script> -->
+<script src="static/js/element.js"></script>
+<script src="static/js/jssip-3.9.1.min.js"></script>
+
+<script>
+  //本地媒体流
+  var localStream = null;
+
+  //创建audio控件并且自动播放
+  const audioView = document.createElement('audio')
+  audioView.autoplay = true;
+
+  //媒体控制
+  const constraints = {
+    audio: true,
+    video: false
+  }
+
+  const getLocalMedia = (stream) => {
+    localStream = stream;
+    audioView.src = URL.createObjectURL(stream)
+  }
+
+  const captureLocalMedia = () => {
+    navigator.getUserMedia(constraints, getLocalMedia, (e) => {
+      console.error('getUserMedia() err: ' + e.name)
+    })
+  }
+
+  new Vue({
+    el: '#app',
+    data: {
+      form: {
+        proto: "wss",
+        username: "",
+        password: "",
+        host: "",
+        port: 5060
+      },
+      ua: null,
+      originator: "", // 呼出、呼入
+      phone: "",
+      registerStatus: "unregister",
+      callStatus: "",
+      callBtn: false,
+      session: null,
+      dtmfs: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "0", "#"],
+      durtime: 0,//计时器
+      callTime: '00:00:00',//计时器-格式化
+      callTimeInter: null,//计时器-定时器,
+      currentAudioReportTimer: null,
+      audioReport: {
+        outboundAudioLevel: 0,
+        outboundPacketsSent: 0, // 上行
+        outboundLost: 0,
+        upLossRate: 0,
+        inboundAudioLevel: 0,
+        inboundPacketsSent: 0, // 下行
+        inboundLost: 0,
+        downLossRate: 0,
+        roundTripTime: 0 // 延迟
+      },
+      loadRegData: {
+        status: false,
+        text: "注册"
+      }
+    },
+    mounted() {
+      const savedData = localStorage.getItem('formData')
+      if (savedData) {
+        this.form = JSON.parse(savedData)
+      }
+    },
+    methods: {
+      register(formName) {
+        this.$refs[formName].validate((valid) => {
+          if (valid) {
+            this.loadRegData.status = true
+            this.loadRegData.text = "注册中"
+            localStorage.setItem('formData', JSON.stringify(this.form))
+            if (this.ua == null) {
+              this.initUA()
+            }
+            if (this.registerStatus == "unregister") {
+              setTimeout(() => {
+                if (this.ua != null) {
+                  this.ua.register()
+                }
+              }, 600)
+            }
+          } else {
+            return false
+          }
+        })
+      },
+      initUA() {
+        this.socket = new JsSIP.WebSocketInterface(this.form.proto + "://" + this.form.host + ":" + this.form.port);
+        var configuration = {
+          sockets: [this.socket],
+          uri: "sip:" + this.form.username + "@" + this.form.host + ":" + this.form.port,
+          password: this.form.password,
+          register: false,
+          register_expires: 30,
+          session_timers: false,
+          user_agent: "JsSIP"
+        };
+        this.ua = new JsSIP.UA(configuration);
+        this.ua.on("disconnected", (e) => {
+          this.registerStatus = "unregister"
+          this.$message.warning("连接断开")
+          this.loadRegData.status = false
+          this.loadRegData.text = "注册"
+          this.ua.stop()
+          this.ua = null
+        })
+        this.ua.on("registered", (e) => {
+          this.registerStatus = "register"
+          this.$message.success("已注册")
+          this.loadRegData.status = false
+          this.loadRegData.text = "注册"
+        })
+        this.ua.on("unregistered", (e) => {
+          this.registerStatus = "unregister"
+          this.$message.warning("已注销")
+        })
+        this.ua.on("registrationFailed", (e) => {
+          this.$message.warning("注册失败")
+          this.loadRegData.status = false
+          this.loadRegData.text = "注册"
+          this.ua = null
+        })
+        //电话事件监听
+        this.ua.on('newRTCSession', (data) => {
+          if (this.session != null) {
+            data.session.terminate()
+            return
+          }
+          let direction = ""
+          this.session = data.session
+          this.callTime = "ring"
+          if (data.originator === 'remote') {
+            this.originator = "呼入"
+            this.callStatus = "call_in"
+            this.phone = data.request.from._uri.user
+            this.callBtn = true
+            this.playRingMedia()
+          } else {
+            this.originator = "呼出"
+            this.callStatus = "call_out"
+            this.phone = data.request.to._uri.user
+          }
+          this.session.on('progress', (evt) => { // 只有有回铃音才有这个事件
+            console.info('通话振铃-->通话振铃', evt)
+          });
+
+          this.session.on('accepted', (evt) => { // 呼入呼出都有
+            console.info('通话中-->通话中')
+            this.callStatus = "busy"
+            this.startTimerCall()
+          });
+
+          this.session.on('ended', (evt) => { // 呼入呼出都有
+            console.info('通话结束-->通话结束')
+            clearInterval(this.currentAudioReportTimer)
+            this.currentAudioReportTimer = null
+            this.session = null
+            this.stopTimerCall()
+            this.stopPlayRingMedia()
+            this.originator = ""
+            this.callStatus = ""
+            this.callBtn = false
+            this.phone = ""
+          });
+
+          this.session.on('failed', (evt) => { // 呼入呼出都有
+            console.info('通话失败-->通话失败')
+            clearInterval(this.currentAudioReportTimer)
+            this.currentAudioReportTimer = null
+            this.session = null
+            this.stopTimerCall()
+            this.stopPlayRingMedia()
+            this.originator = ""
+            this.callStatus = ""
+            this.callBtn = false
+            this.phone = ""
+            this.$message.warning("呼叫失败: " + evt.cause)
+          })
+
+          this.session.on('peerconnection', (evt) => {
+            //处理通话中媒体流
+            this.handleAudio(evt.peerconnection)
+          });
+
+          //防止检测时间过长
+          let iceCandidateTimeout = null;
+          this.session.on('icecandidate', (evt) => {
+            if (iceCandidateTimeout != null) {
+              clearTimeout(iceCandidateTimeout);
+            }
+            if (evt.candidate.type === "srflx" || evt.candidate.type === "relay") {
+              evt.ready();
+            }
+            iceCandidateTimeout = setTimeout(evt.ready, 1000);
+          })
+
+        })
+        this.ua.start()
+      },
+      unregister() {
+        if (this.registerStatus == "register") {
+          this.ua.unregister({ all: true })
+        }
+      },
+      answer() {
+        this.stopPlayRingMedia()
+        this.session.answer({
+          mediaConstraints: constraints
+          // pcConfig: {
+          //     'iceServers': [
+          //         { 'urls': ['stun:public.callcenter.meiqia.com'] },
+          //         { 'urls': 'turn:public.callcenter.meiqia.com', 'username': 'foo', 'credential': ' 1234' }
+          //     ]
+          // }
+        })
+      },
+      hangup() {
+        this.session.terminate()
+        this.stopTimerCall()
+        this.stopPlayRingMedia()
+        this.originator = ""
+        this.callStatus = ""
+        this.callBtn = false
+      },
+      call() {
+        if (this.phone == "") {
+          return
+        }
+        this.callBtn = true
+        this.ua.call(this.phone, {
+          eventHandlers: {
+            peerconnection: (e) => {
+              let pc = e.peerconnection
+              this.handleAudio(pc)
+            }
+          },
+          mediaConstraints: constraints,
+          mediaStream: localStream,
+          //extraHeaders: ["X-JCallId: " + currentCallId],
+          sessionTimersExpires: 120
+          // 'pcConfig': {
+          //     'iceServers': [
+          //         { 'urls': ['stun:public.callcenter.meiqia.com'] }
+          //         { 'urls': 'turn:public.callcenter.meiqia.com', 'username': 'foo', 'credential': ' 1234' }
+          //     ]
+          // }
+        })
+      },
+      handleKeyup() {
+        this.call()
+      },
+      sendDtmf(key) {
+        if (this.session !== null && this.callStatus == "busy") {
+          // let options = {
+          //   'duration': 160,
+          //   'interToneGap': 1200,
+          //   'extraHeaders': ['X-Foo: foo', 'X-Bar: bar'],
+          //   'transportType': "INFO"
+          // };
+          // this.session.sendDTMF(dtmf,options)
+          this.session.sendDTMF(key)
+        }
+      },
+      //启动计时器
+      startTimerCall() {
+        if (this.callTimeInter) {
+          clearInterval(this.callTimeInter);
+          this.callTime = "00:00:00";
+          this.durtime = 0;
+        }
+        this.callTimeInter = setInterval(() => {
+          this.timerCall();
+        }, 1000)
+      },
+      //停止计时器
+      stopTimerCall() {
+        if (this.callTimeInter) {
+          clearInterval(this.callTimeInter);
+          this.callTime = "00:00:00";
+          this.durtime = 0;
+        }
+      },
+      //计时器
+      timerCall() {
+        this.durtime++;
+        var sec = this.durtime % 60;
+        if (sec < 10) {
+          sec = "0" + sec;
+        }
+        var min = Math.floor((this.durtime % (60 * 60)) / 60);
+        if (min < 10) {
+          min = "0" + min;
+        }
+        var hour = Math.floor(this.durtime / (60 * 60));
+        if (hour < 10) {
+          hour = "0" + hour;
+        }
+        this.callTime = hour + ":" + min + ":" + sec
+      },
+      //播放挂机铃声
+      playHangupMedia() {
+        let hangupAudio = document.getElementById("hangupMediaAudioId")
+        if (!hangupAudio) {
+          hangupAudio = document.createElement('audio');
+          hangupAudio.id = 'hangupMediaAudioId';
+          hangupAudio.hidden = true;
+          hangupAudio.src = './static/wav/hangup.wav'
+          document.body.appendChild(hangupAudio);
+        }
+        hangupAudio.play();
+      },
+      //播放来电振铃
+      playRingMedia() {
+        this.stopPlayRingMedia();
+        let ringAudio = document.getElementById("ringMediaAudioId")
+        if (!ringAudio) {
+          ringAudio = document.createElement('audio');
+          ringAudio.id = 'ringMediaAudioId';
+          ringAudio.hidden = true;
+          ringAudio.src = './static/wav/ring.wav';
+          ringAudio.loop = 'loop';
+          document.body.appendChild(ringAudio);
+        }
+        ringAudio.play();
+      },
+      //停止播放来电振铃
+      stopPlayRingMedia() {
+        let ringAudio = document.getElementById("ringMediaAudioId");
+        if (ringAudio) {
+          document.body.removeChild(ringAudio);
+        }
+      },
+      //处理媒体
+      handleAudio(pc) {
+        //网络情况统计
+        this.audioReport = {
+          outboundAudioLevel: 0,
+          outboundPacketsSent: 0, // 上行
+          outboundLost: 0,
+          upLossRate: 0,
+          inboundAudioLevel: 0,
+          inboundPacketsSent: 0, // 下行
+          inboundLost: 0,
+          downLossRate: 0,
+          roundTripTime: 0 // 延迟
+        }
+        this.currentAudioReportTimer = setInterval(() => {
+          pc.getStats().then((stats) => {
+            stats.forEach((report) => {
+              if (report.type == 'media-source') {
+                this.audioReport.outboundAudioLevel = report.audioLevel
+              }
+              if (report.type != 'remote-inbound-rtp' && report.type != 'inbound-rtp' && report.type != 'remote-outbound-rtp' && report.type != 'outbound-rtp') {
+                return
+              }
+              switch (report.type) {
+                case "outbound-rtp"://客户端发送的-上行
+                  this.audioReport.outboundPacketsSent = report.packetsSent
+                  break;
+                case "remote-inbound-rtp"://服务器收到的-对于客户端来说也就是上行
+                  this.audioReport.outboundLost = report.packetsLost
+                  //延时(只会在这里有这个)
+                  this.audioReport.roundTripTime = Math.floor(report.roundTripTime * 1000)
+                  break;
+                case "inbound-rtp"://客户端收到的-下行
+                  this.audioReport.inboundLost = report.packetsLost
+                  this.audioReport.inboundAudioLevel = report.audioLevel
+                  break;
+                case "remote-outbound-rtp"://服务器发送的-对于客户端来说就是下行
+                  this.audioReport.inboundPacketsSent = report.packetsSent
+                  break
+              }
+            });
+            if (this.audioReport.inboundPacketsSent > 0) {
+              this.audioReport.downLossRate = this.audioReport.inboundLost / this.audioReport.inboundPacketsSent
+            }
+            if (this.audioReport.outboundPacketsSent) {
+              this.audioReport.upLossRate = this.audioReport.outboundLost / this.audioReport.outboundPacketsSent;
+            }
+            console.log(
+              '上行/下行(丢包率):' +
+              (this.audioReport.upLossRate * 100).toFixed(2) + "% / " +
+              (this.audioReport.downLossRate * 100).toFixed(2) + "%",
+              "延迟:" + this.audioReport.roundTripTime.toFixed(2) + "ms"
+            );
+          })
+        }, 1000);
+
+        if ("addTrack" in pc) {
+          pc.ontrack = (media) => {
+            if (media.streams.length > 0 && media.streams[0].active) {
+              audioView.srcObject = media.streams[0];
+            }
+          }
+        } else {
+          pc.onaddstream = (media) => {
+            let remoteStream = media.stream;
+            if (remoteStream.active) {
+              audioView.srcObject = remoteStream;
+            }
+          }
+        }
+      }
+    }
+  })
+</script>
+
+</html>

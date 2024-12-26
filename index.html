@@ -327,7 +327,7 @@
       },
       unregister() {
         if (this.session != null) {
-          this.session.terminate()
+          this.hangup()
         }
         if (this.registerStatus == "register") {
           this.ua.unregister({ all: true })

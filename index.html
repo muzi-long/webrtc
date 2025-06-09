@@ -32,12 +32,8 @@
                 <el-input placeholder="请输入" clearable v-model="form.password"></el-input>
               </el-form-item>
               <el-form-item label="地址" prop="host" :rules="[{ required: true, message: '地址不能为空'}]">
-                <el-col :span="16">
+                <el-col>
                   <el-input placeholder="127.0.0.1" clearable v-model="form.host"></el-input>
-                </el-col>
-                <el-col style="text-align: center;" :span="1">:</el-col>
-                <el-col :span="7">
-                  <el-input type="number" placeholder="5060" v-model="form.port"></el-input>
                 </el-col>
               </el-form-item>
               <el-form-item>
@@ -154,7 +150,6 @@
         username: "",
         password: "",
         host: "",
-        port: 5060
       },
       ua: null,
       originator: "", // 呼出、呼入
@@ -213,10 +208,10 @@
         })
       },
       initUA() {
-        this.socket = new JsSIP.WebSocketInterface(this.form.proto + "://" + this.form.host + ":" + this.form.port);
+        this.socket = new JsSIP.WebSocketInterface(this.form.proto + "://" + this.form.host);
         var configuration = {
           sockets: [this.socket],
-          uri: "sip:" + this.form.username + "@" + this.form.host + ":" + this.form.port,
+          uri: "sip:" + this.form.username + "@" + this.form.host,
           password: this.form.password,
           register: false,
           register_expires: 30,
@@ -225,6 +220,7 @@
         };
         this.ua = new JsSIP.UA(configuration);
         this.ua.on("disconnected", (e) => {
+          console.info(e)
           this.registerStatus = "unregister"
           this.$message.warning("连接断开")
           this.loadRegData.status = false
@@ -243,6 +239,7 @@
           this.$message.warning("已注销")
         })
         this.ua.on("registrationFailed", (e) => {
+          console.info(e)
           this.$message.warning("注册失败")
           this.loadRegData.status = false
           this.loadRegData.text = "注册"

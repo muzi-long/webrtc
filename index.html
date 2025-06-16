@@ -186,27 +186,6 @@
       }
     },
     methods: {
-      register(formName) {
-        this.$refs[formName].validate((valid) => {
-          if (valid) {
-            this.loadRegData.status = true
-            this.loadRegData.text = "注册中"
-            localStorage.setItem('formData', JSON.stringify(this.form))
-            if (this.ua == null) {
-              this.initUA()
-            }
-            if (this.registerStatus == "unregister") {
-              setTimeout(() => {
-                if (this.ua != null) {
-                  this.ua.register()
-                }
-              }, 600)
-            }
-          } else {
-            return false
-          }
-        })
-      },
       initUA() {
         this.socket = new JsSIP.WebSocketInterface(this.form.proto + "://" + this.form.host);
         var configuration = {
@@ -219,6 +198,14 @@
           user_agent: "JsSIP"
         };
         this.ua = new JsSIP.UA(configuration);
+        this.ua.on("connected", (e) => {
+          console.info(e)
+        })
+        this.ua.on("connecting", (e) => {
+          console.info(e)
+          this.$message.info("连接中")
+          this.loadRegData.status = false
+        })
         this.ua.on("disconnected", (e) => {
           console.info(e)
           this.registerStatus = "unregister"
@@ -321,6 +308,27 @@
 
         })
         this.ua.start()
+      },
+      register(formName) {
+        this.$refs[formName].validate((valid) => {
+          if (valid) {
+            this.loadRegData.status = true
+            this.loadRegData.text = "注册中"
+            localStorage.setItem('formData', JSON.stringify(this.form))
+            if (this.ua == null) {
+              this.initUA()
+            }
+            if (this.registerStatus == "unregister") {
+              setTimeout(() => {
+                if (this.ua != null) {
+                  this.ua.register()
+                }
+              }, 600)
+            }
+          } else {
+            return false
+          }
+        })
       },
       unregister() {
         if (this.session != null) {

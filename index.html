@@ -8,6 +8,30 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Type" content="text/html;charset=utf-8">
   <link rel="stylesheet" href="static/css/element.css">
+  <style>
+    /* 通话记录表格样式优化 */
+    .el-table .cell {
+      white-space: nowrap !important;
+      overflow: hidden !important;
+      text-overflow: ellipsis !important;
+    }
+    .el-table th, .el-table td {
+      padding: 8px 0 !important;
+    }
+    .el-table--mini th, .el-table--mini td {
+      padding: 4px 0 !important;
+    }
+    /* 表格自适应并铺满容器 */
+    .el-table {
+      width: 100% !important;
+    }
+    /* 调整标签大小 */
+    .el-tag--mini {
+      height: 20px !important;
+      line-height: 18px !important;
+      font-size: 11px !important;
+    }
+  </style>
 </head>
 
 <body>
@@ -48,7 +72,12 @@
 
         <!-- 注册后 -->
         <el-card class="box-card" v-show="this.registerStatus == 'register'">
-          <div slot="header" class="clearfix"><span>拨打电话</span></div>
+          <div slot="header" class="clearfix">
+            <span>拨打电话</span>
+            <el-button style="float: right; padding: 3px 0" type="text" @click="showHistory = !showHistory">
+              {{showHistory ? '隐藏历史' : '通话记录'}}
+            </el-button>
+          </div>
           <div class="text item">
             <el-form size="mini" @submit.native.prevent>
 
@@ -102,6 +131,38 @@
               </el-form-item>
 
             </el-form>
+          </div>
+        </el-card>
+
+        <!-- 通话历史记录 -->
+        <el-card class="box-card" v-show="this.registerStatus == 'register' && showHistory" style="margin-top: 10px;">
+          <div slot="header" class="clearfix">
+            <span>通话记录</span>
+            <el-button style="float: right; padding: 3px 0" type="text" @click="clearHistory">
+              清空记录
+            </el-button>
+          </div>
+          <div class="text item">
+            <div v-if="callHistory.length === 0" style="text-align: center; color: #999; padding: 20px;">
+              暂无通话记录
+            </div>
+            <el-table v-else :data="callHistory" size="mini" max-height="300">
+              <el-table-column prop="caller" label="主叫" min-width="100"></el-table-column>
+              <el-table-column prop="callee" label="被叫" min-width="100"></el-table-column>
+              <el-table-column prop="duration" label="时长" width="80"></el-table-column>
+              <el-table-column prop="startTime" label="开始时间" min-width="140">
+                <template slot-scope="scope">
+                  {{formatDateTime(scope.row.actualStartTime || scope.row.startTime)}}
+                </template>
+              </el-table-column>
+              <el-table-column prop="status" label="状态" width="70">
+                <template slot-scope="scope">
+                  <el-tag :type="scope.row.status === '成功' ? 'success' : 'danger'" size="mini">
+                    {{scope.row.status}}
+                  </el-tag>
+                </template>
+              </el-table-column>
+            </el-table>
           </div>
         </el-card>
 
@@ -178,13 +239,19 @@
       loadRegData: {
         status: false,
         text: "注册"
-      }
+      },
+      // 通话历史记录
+      showHistory: false,
+      callHistory: [],
+      currentCallRecord: null // 当前通话记录
     },
     mounted() {
       const savedData = localStorage.getItem('formData')
       if (savedData) {
         this.form = JSON.parse(savedData)
       }
+      // 加载通话历史记录
+      this.loadCallHistory()
     },
     methods: {
       initUA() {
@@ -248,10 +315,14 @@
             this.phone = data.request.from._uri.user
             this.callBtn = true
             this.playRingMedia()
+            // 创建呼入通话记录
+            this.createCallRecord(data.request.from._uri.user, this.form.username, 'inbound')
           } else {
             this.originator = "呼出"
             this.callStatus = "call_out"
             this.phone = data.request.to._uri.user
+            // 创建呼出通话记录
+            this.createCallRecord(this.form.username, data.request.to._uri.user, 'outbound')
           }
           this.session.on('progress', (evt) => { // 只有有回铃音才有这个事件
             console.info('通话振铃-->通话振铃', evt)
@@ -261,6 +332,10 @@
             console.info('通话中-->通话中')
             this.callStatus = "busy"
             this.startTimerCall()
+            // 更新通话记录的真实开始时间
+            if (this.currentCallRecord) {
+              this.currentCallRecord.actualStartTime = Date.now()
+            }
           });
 
           this.session.on('ended', (evt) => { // 呼入呼出都有
@@ -274,6 +349,8 @@
             this.callStatus = ""
             this.callBtn = false
             this.phone = ""
+            // 记录成功结束的通话
+            this.finishCallRecord(true)
           });
 
           this.session.on('failed', (evt) => { // 呼入呼出都有
@@ -288,6 +365,8 @@
             this.callBtn = false
             this.phone = ""
             this.$message.warning("呼叫失败: " + evt.cause)
+            // 记录失败的通话
+            this.finishCallRecord(false)
           })
 
           this.session.on('peerconnection', (evt) => {
@@ -536,6 +615,87 @@
               audioView.srcObject = remoteStream;
             }
           }
+        }
+      },
+      // 加载通话历史记录
+      loadCallHistory() {
+        const savedHistory = localStorage.getItem('callHistory')
+        if (savedHistory) {
+          this.callHistory = JSON.parse(savedHistory)
+        }
+      },
+      // 保存通话历史记录
+      saveCallHistory() {
+        localStorage.setItem('callHistory', JSON.stringify(this.callHistory))
+      },
+      // 清空历史记录
+      clearHistory() {
+        this.$confirm('确定要清空所有通话记录吗？', '提示', {
+          confirmButtonText: '确定',
+          cancelButtonText: '取消',
+          type: 'warning'
+        }).then(() => {
+          this.callHistory = []
+          this.saveCallHistory()
+          this.$message.success('已清空通话记录')
+        }).catch(() => {})
+      },
+      // 格式化日期时间
+      formatDateTime(timestamp) {
+        const date = new Date(timestamp)
+        const month = String(date.getMonth() + 1).padStart(2, '0')
+        const day = String(date.getDate()).padStart(2, '0')
+        const hours = String(date.getHours()).padStart(2, '0')
+        const minutes = String(date.getMinutes()).padStart(2, '0')
+        const seconds = String(date.getSeconds()).padStart(2, '0')
+        return `${month}-${day} ${hours}:${minutes}:${seconds}`
+      },
+      // 创建通话记录
+      createCallRecord(caller, callee, direction) {
+        this.currentCallRecord = {
+          id: Date.now(),
+          caller: caller,
+          callee: callee,
+          direction: direction, // 'outbound' 或 'inbound'
+          startTime: Date.now(), // 创建记录时间
+          actualStartTime: null, // 实际通话开始时间
+          endTime: null,
+          duration: '00:00:00',
+          status: '进行中'
+        }
+      },
+      // 结束通话记录
+      finishCallRecord(success = true) {
+        if (this.currentCallRecord) {
+          this.currentCallRecord.endTime = Date.now()
+          
+          // 计算实际通话时长
+          if (this.currentCallRecord.actualStartTime && success) {
+            const durationMs = this.currentCallRecord.endTime - this.currentCallRecord.actualStartTime
+            const durationSec = Math.floor(durationMs / 1000)
+            const hours = Math.floor(durationSec / 3600)
+            const minutes = Math.floor((durationSec % 3600) / 60)
+            const seconds = durationSec % 60
+            this.currentCallRecord.duration = 
+              String(hours).padStart(2, '0') + ':' + 
+              String(minutes).padStart(2, '0') + ':' + 
+              String(seconds).padStart(2, '0')
+          } else {
+            this.currentCallRecord.duration = '00:00:00'
+          }
+          
+          this.currentCallRecord.status = success ? '成功' : '失败'
+          
+          // 添加到历史记录最前面
+          this.callHistory.unshift(this.currentCallRecord)
+          
+          // 保持最多100条记录
+          if (this.callHistory.length > 100) {
+            this.callHistory = this.callHistory.slice(0, 100)
+          }
+          
+          this.saveCallHistory()
+          this.currentCallRecord = null
         }
       }
     }
